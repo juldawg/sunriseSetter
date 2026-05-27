@@ -14,11 +14,35 @@ RTC_DS3231 rtc;
 RTC_Millis rtc_millis;
 
 static const uint8_t CLOCK_INTERRUPT_PIN = 3;
+static const int MAX_RED = 255;
+static const int MAX_GREEN = 255;
+static const int MAX_BLUE = 150;
 
 // The time of the day when the dimming shall start increasing (24 hour clock)
 uint8_t START_HOUR = 9;
 uint8_t START_MINUTE = 0;
 uint8_t START_SECOND = 0;
+
+boolean ALARM_DAYS[7] = {false,  //Sunday
+                           true,  //Monday
+                           true,  //Tuesday
+                           true,  //Wednesday
+                           true,  //Thursday
+                           true,  //Friday
+                           false}; //Saturday
+
+uint8_t START_HOUR_1 = 9;
+uint8_t START_MINUTE_1 = 0;
+uint8_t START_SECOND_1 = 0;
+
+boolean ALARM_DAYS_1[7] = {false,  //Sunday
+                           true,  //Monday
+                           true,  //Tuesday
+                           true,  //Wednesday
+                           true,  //Thursday
+                           true,  //Friday
+                           false}; //Saturday
+
 // The time of the day when the dimming shall start decreasing (24 hour clock)
 uint8_t END_HOUR = 23;
 uint8_t END_MINUTE = 51;
@@ -27,6 +51,14 @@ uint8_t END_SECOND = 0;
 uint8_t DURATION_HOURS = 0;
 uint8_t DURATION_MINUTES = 30;
 uint8_t DURATION_SECONDS = 0;
+
+boolean SUNSET_ALARM_DAYS[7] = {true,  //Sunday
+                           true,  //Monday
+                           true,  //Tuesday
+                           true,  //Wednesday
+                           true,  //Thursday
+                           true,  //Friday
+                           true}; //Saturday                        
 
 enum class AlarmType: uint8_t {
   SUNRISE = 1,
@@ -37,11 +69,37 @@ struct AlarmSettings {
   uint8_t hour;
   uint8_t minute;
   uint8_t second;
+  boolean alarmDays[7];
 
-  AlarmSettings(uint8_t hour, uint8_t minute, uint8_t second) {
+  AlarmSettings(uint8_t hour,uint8_t minute,uint8_t second, boolean alarmDays[7]) {
     this->hour = hour;
     this->minute = minute;
     this->second = second;
+    this->alarmDays[7] = alarmDays;
+  }
+
+  DateTime nextAlarmDateTime() {
+    TimeSpan oneDay = TimeSpan(1, 0, 0, 0);
+    DateTime now = rtc.now();
+    DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
+    if (alarmTime < now) {
+        alarmTime = alarmTime + oneDay;
+    }
+    int i = 0;
+    bool dayMatches = false;
+    while (!dayMatches && i < 7) {
+      uint8_t dayIndex = now.dayOfTheWeek();
+      if(!alarmDays[dayIndex]){
+        dayMatches = true;
+      } else {
+        alarmTime = alarmTime + oneDay;
+        i++;
+      }
+    }
+    if (!dayMatches) {
+      // TODO: handle exception
+    }
+    return alarmTime;
   }
 };
 
@@ -50,17 +108,25 @@ struct Alarm {
   Alarm(AlarmType type) {
     this->type = type;
   }
-  AlarmSettings alarmSettings() { 
+
+  DateTime dateTime() { 
     switch (type) {
-      case AlarmType::SUNRISE: return AlarmSettings(START_HOUR, START_MINUTE, START_SECOND);
-      case AlarmType::SUNSET: return AlarmSettings(END_HOUR, END_MINUTE, END_SECOND);
+      case AlarmType::SUNRISE: return nextWakeUpAlarmDateTime();
+      case AlarmType::SUNSET: return AlarmSettings(END_HOUR, END_MINUTE, END_SECOND, SUNSET_ALARM_DAYS).nextAlarmDateTime();
     }
   }
+
   bool setAlarm(const DateTime &dt) {
     switch (type) {
-      case AlarmType::SUNRISE: return rtc.setAlarm1(dt, DS3231_A1_Hour);
+      case AlarmType::SUNRISE: return rtc.setAlarm1(dt, DS3231_A1_Day);
       case AlarmType::SUNSET:  return rtc.setAlarm2(dt, DS3231_A2_Hour);
     }
+  }
+
+  private: DateTime nextWakeUpAlarmDateTime() {
+    AlarmSettings alarmSettings = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
+    AlarmSettings alarmSettings1 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
+    return min(alarmSettings.nextAlarmDateTime(), alarmSettings1.nextAlarmDateTime());
   }
 };
 
@@ -80,11 +146,21 @@ struct Brightness {
   }
 };
 
+enum class SettingMode {
+  BRIGHTNESS,
+  TIME,
+  FREQUENCY
+};
+
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
-bool dimming_up;
-bool dimming_down;
+bool dimming_up = false;
+bool dimming_down = false;
 long delayBetweenIncrements;
+SettingMode settingMode = SettingMode::BRIGHTNESS;
+bool radioOn = false;
+bool lightsOn = false;
+bool shouldSunRise = true;
   
 // =====================================
 // ARDUINO SETUP ROUTINE
@@ -95,8 +171,6 @@ void setup() {
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
   setLEDS(Brightness(0,0,0));
-  dimming_up = false;
-  dimming_down = false;
   delayBetweenIncrements = sunriseDuration / 256;
   initRTC();
 }
@@ -111,9 +185,9 @@ void loop() {
       //reset flag
       rtc.clearAlarm(1);
       //Start dimming up
-      dimming_up = true;
+      dimming_up = shouldSunRise;
       startingTime = millis();
-
+      setAlarm(Alarm(AlarmType::SUNRISE));
     }
   if (rtc.alarmFired(2))
     {
@@ -122,7 +196,8 @@ void loop() {
       rtc.clearAlarm(2);
       //Start dimming up
       dimming_down = true;
-      startingTime = millis();
+      startingTime = millis();      
+      setAlarm(Alarm(AlarmType::SUNSET));
 
     }
     if (dimming_up || dimming_down) {
@@ -133,9 +208,6 @@ void loop() {
       if (elapsedTime > sunriseDuration) {
         dimming_up = false;
         dimming_down = false;
-              
-        initAlarm(Alarm(AlarmType::SUNSET));
-        initAlarm(Alarm(AlarmType::SUNRISE));
       }
     } else {
       if (rtc.getAlarm1() < rtc.getAlarm2()) {
@@ -146,9 +218,15 @@ void loop() {
     }
     delay(delayBetweenIncrements);
 }
+
+void toogleLights(bool On) {
+  lightsOn = On;
+}
     
  // Send the LED levels to the Arduino pins
  void setLEDS(Brightness brightness) {
+  bool max = brightness.red == MAX_RED && brightness.green == MAX_GREEN && brightness.blue == MAX_BLUE;
+  shouldSunRise = !max; // Disable sunrise when lights are already at max
   analogWrite(RED_PIN, brightness.red);
   analogWrite(GREEN_PIN, brightness.green);
   analogWrite(BLUE_PIN, brightness.blue);
@@ -229,19 +307,14 @@ void initRTC(){
   rtc.writeSqwPinMode(DS3231_OFF);
   char buf1[] = "RTC Time: DD MM YYYY-hh:mm:ss";
   Serial.println(rtc.now().toString(buf1));
-  initAlarm(Alarm(AlarmType::SUNSET));
-  initAlarm(Alarm(AlarmType::SUNRISE));
+  setAlarm(Alarm(AlarmType::SUNSET));
+  setAlarm(Alarm(AlarmType::SUNRISE));
 }
 
-void initAlarm(Alarm alarm) {
+void setAlarm(Alarm alarm) {
   uint8_t alarmType = static_cast<uint8_t>(alarm.type);
   rtc.clearAlarm(alarmType);
-  DateTime now = rtc.now();
-  AlarmSettings alarmSettings = alarm.alarmSettings();
-  DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), alarmSettings.hour, alarmSettings.minute, alarmSettings.second);
-  if(alarmTime < now) {
-    alarmTime = alarmTime + TimeSpan(1, 0, 0, 0); // add one day if already past
-  }
+  DateTime alarmTime = alarm.dateTime();
   alarm.setAlarm(alarmTime);
 }
 
