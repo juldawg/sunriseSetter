@@ -2,6 +2,7 @@
 #include <RTClib.h>
 #include <TimerOne.h>
 #include <Wire.h>
+#include <Optional.h>
 
 // ARDUINO CONSTANT & VARIABLE DEFINITIONS
 // -------------------------------------
@@ -78,7 +79,7 @@ struct AlarmSettings {
     this->alarmDays[7] = alarmDays;
   }
 
-  DateTime nextAlarmDateTime() {
+  Optional<DateTime> nextAlarmDateTime() {
     TimeSpan oneDay = TimeSpan(1, 0, 0, 0);
     DateTime now = rtc.now();
     DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
@@ -97,7 +98,7 @@ struct AlarmSettings {
       }
     }
     if (!dayMatches) {
-      // TODO: handle exception
+      return {}; // alarm is not active on any day (should not happen)
     }
     return alarmTime;
   }
@@ -109,7 +110,7 @@ struct Alarm {
     this->type = type;
   }
 
-  DateTime dateTime() { 
+  Optional<DateTime> dateTime() { 
     switch (type) {
       case AlarmType::SUNRISE: return nextWakeUpAlarmDateTime();
       case AlarmType::SUNSET: return AlarmSettings(END_HOUR, END_MINUTE, END_SECOND, SUNSET_ALARM_DAYS).nextAlarmDateTime();
@@ -123,10 +124,17 @@ struct Alarm {
     }
   }
 
-  private: DateTime nextWakeUpAlarmDateTime() {
+  private: Optional<DateTime> nextWakeUpAlarmDateTime() {
     AlarmSettings alarmSettings = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
     AlarmSettings alarmSettings1 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
-    return min(alarmSettings.nextAlarmDateTime(), alarmSettings1.nextAlarmDateTime());
+    Optional<DateTime> firstAlarm = alarmSettings.nextAlarmDateTime();
+    Optional<DateTime> secondAlarm = alarmSettings1.nextAlarmDateTime();
+    if (firstAlarm.hasValue() && secondAlarm.hasValue()) {
+      return min(firstAlarm.getValue(), secondAlarm.getValue());
+    } else if (firstAlarm.hasValue()) {
+      return firstAlarm;
+    }
+    return secondAlarm;
   }
 };
 
@@ -314,8 +322,10 @@ void initRTC(){
 void setAlarm(Alarm alarm) {
   uint8_t alarmType = static_cast<uint8_t>(alarm.type);
   rtc.clearAlarm(alarmType);
-  DateTime alarmTime = alarm.dateTime();
-  alarm.setAlarm(alarmTime);
+  Optional<DateTime> alarmTime = alarm.dateTime();
+  if(alarmTime.hasValue()) {
+    alarm.setAlarm(alarmTime.getValue());
+  }
 }
 
 
