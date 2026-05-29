@@ -159,15 +159,22 @@ struct Brightness {
 enum class SettingMode {
   BRIGHTNESS,
   TIME,
-  FREQUENCY
+  FREQUENCY,
+  IDLE
 };
+
+enum class TimeSettingMode {
+  HOURS,
+  MINUTES,
+  DAYS
+}
 
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
 bool dimming_up = false;
 bool dimming_down = false;
 long delayBetweenIncrements;
-SettingMode settingMode = SettingMode::BRIGHTNESS;
+SettingMode settingMode = SettingMode::IDLE;
 bool radioOn = false;
 bool lightsOn = false;
 bool shouldSunRise = true;
