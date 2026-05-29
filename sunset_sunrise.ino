@@ -18,6 +18,8 @@ static const uint8_t CLOCK_INTERRUPT_PIN = 3;
 static const int MAX_RED = 255;
 static const int MAX_GREEN = 255;
 static const int MAX_BLUE = 150;
+static const int idle_threshold_setting_mode = 5 // in seconds
+static const int idle_threshold_time_setting_mode = 10 // in seconds
 
 // The time of the day when the dimming shall start increasing (24 hour clock)
 uint8_t START_HOUR = 9;
@@ -171,6 +173,7 @@ enum class TimeSettingMode {
 
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
+unsigned long settingChangeTime;
 bool dimming_up = false;
 bool dimming_down = false;
 long delayBetweenIncrements;
@@ -196,6 +199,7 @@ void setup() {
 // ARDUINO MAIN LOOP ROUTINE
 // -------------------------------------
 void loop() {
+  displayDigits();
   if (rtc.alarmFired(1))
     {
       Serial.println("Alarm 1 has gone off. Dimming UP!\n");
@@ -233,7 +237,16 @@ void loop() {
         setLEDS(Brightness(255,255,79));
       }
     }
-    delay(delayBetweenIncrements);
+    // delay(delayBetweenIncrements); // this might mess up the digit display
+}
+
+void displayDigits() {
+  if (settingMode == SettingMode::IDLE) {
+    // Display time
+  } else if (settingMode == SettingMode::BRIGHTNESS) {
+    // Display Brightness level
+    // Check if should default back to idle
+  }
 }
 
 void toogleLights(bool On) {
