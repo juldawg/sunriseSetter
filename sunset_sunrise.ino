@@ -59,7 +59,11 @@ boolean SUNSET_ALARM_DAYS[7] = {true,  //Sunday
                            true,  //Wednesday
                            true,  //Thursday
                            true,  //Friday
-                           true}; //Saturday                        
+                           true}; //Saturday 
+
+// User alarm settings storage for alarm 1&2
+AlarmSettings sunriseAlarm = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
+AlarmSettings sunriseAlarm2 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
 
 enum class AlarmType: uint8_t {
   SUNRISE = 1,
@@ -125,10 +129,8 @@ struct Alarm {
   }
 
   private: Optional<DateTime> nextWakeUpAlarmDateTime() {
-    AlarmSettings alarmSettings = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
-    AlarmSettings alarmSettings1 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
-    Optional<DateTime> firstAlarm = alarmSettings.nextAlarmDateTime();
-    Optional<DateTime> secondAlarm = alarmSettings1.nextAlarmDateTime();
+    Optional<DateTime> firstAlarm = sunriseAlarm.nextAlarmDateTime();
+    Optional<DateTime> secondAlarm = sunriseAlarm1.nextAlarmDateTime();
     if (firstAlarm.hasValue() && secondAlarm.hasValue()) {
       return min(firstAlarm.getValue(), secondAlarm.getValue());
     } else if (firstAlarm.hasValue()) {
