@@ -1,3 +1,7 @@
+#include <LiquidCrystal.h>
+
+#include <Toggle.h>
+
 
 #include <RTClib.h>
 #include <TimerOne.h>
@@ -18,8 +22,8 @@ static const uint8_t CLOCK_INTERRUPT_PIN = 3;
 static const int MAX_RED = 255;
 static const int MAX_GREEN = 255;
 static const int MAX_BLUE = 150;
-static const int idle_threshold_setting_mode = 5 // in seconds
-static const int idle_threshold_time_setting_mode = 10 // in seconds
+static const int idle_threshold_setting_mode = 5; // in seconds
+static const int idle_threshold_time_setting_mode = 10; // in seconds
 
 // The time of the day when the dimming shall start increasing (24 hour clock)
 uint8_t START_HOUR = 9;
@@ -63,10 +67,6 @@ boolean SUNSET_ALARM_DAYS[7] = {true,  //Sunday
                            true,  //Friday
                            true}; //Saturday 
 
-// User alarm settings storage for alarm 1&2
-AlarmSettings sunriseAlarm = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
-AlarmSettings sunriseAlarm2 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
-
 enum class AlarmType: uint8_t {
   SUNRISE = 1,
   SUNSET = 2
@@ -77,6 +77,7 @@ struct AlarmSettings {
   uint8_t minute;
   uint8_t second;
   boolean alarmDays[7];
+  bool isActive = true;
 
   AlarmSettings(uint8_t hour,uint8_t minute,uint8_t second, boolean alarmDays[7]) {
     this->hour = hour;
@@ -85,30 +86,50 @@ struct AlarmSettings {
     this->alarmDays[7] = alarmDays;
   }
 
-  Optional<DateTime> nextAlarmDateTime() {
-    TimeSpan oneDay = TimeSpan(1, 0, 0, 0);
+  void toggleIsActive() {
+    isActive = !isActive;
+  }
+
+  void setToNow() {
     DateTime now = rtc.now();
-    DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
-    if (alarmTime < now) {
-        alarmTime = alarmTime + oneDay;
-    }
-    int i = 0;
-    bool dayMatches = false;
-    while (!dayMatches && i < 7) {
-      uint8_t dayIndex = now.dayOfTheWeek();
-      if(!alarmDays[dayIndex]){
-        dayMatches = true;
-      } else {
-        alarmTime = alarmTime + oneDay;
-        i++;
+    hour = now.hour();
+    minute = now.minute();
+    second = now.second();
+  }
+
+  Optional<DateTime> nextAlarmDateTime() {
+    if(isActive) {
+      TimeSpan oneDay = TimeSpan(1, 0, 0, 0);
+      DateTime now = rtc.now();
+      DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
+      if (alarmTime < now) {
+          alarmTime = alarmTime + oneDay;
       }
+      int i = 0;
+      bool dayMatches = false;
+      while (!dayMatches && i < 7) {
+        uint8_t dayIndex = now.dayOfTheWeek();
+        if(!alarmDays[dayIndex]){
+          dayMatches = true;
+        } else {
+          alarmTime = alarmTime + oneDay;
+          i++;
+        }
+      }
+      if (!dayMatches) {
+        return {}; // alarm is not active on any day (should not happen)
+      }
+      return alarmTime;
+    } else {
+      return {};
     }
-    if (!dayMatches) {
-      return {}; // alarm is not active on any day (should not happen)
-    }
-    return alarmTime;
   }
 };
+
+// User alarm settings storage for alarm 1&2
+AlarmSettings sunriseAlarm = AlarmSettings(START_HOUR, START_MINUTE, START_SECOND, ALARM_DAYS);
+AlarmSettings sunriseAlarm1 = AlarmSettings(START_HOUR_1, START_MINUTE_1, START_SECOND_1, ALARM_DAYS_1);
+AlarmSettings sunsetAlarm = AlarmSettings(END_HOUR, END_MINUTE, END_SECOND, SUNSET_ALARM_DAYS);
 
 struct Alarm {
   AlarmType type;
@@ -119,7 +140,7 @@ struct Alarm {
   Optional<DateTime> dateTime() { 
     switch (type) {
       case AlarmType::SUNRISE: return nextWakeUpAlarmDateTime();
-      case AlarmType::SUNSET: return AlarmSettings(END_HOUR, END_MINUTE, END_SECOND, SUNSET_ALARM_DAYS).nextAlarmDateTime();
+      case AlarmType::SUNSET: return sunsetAlarm.nextAlarmDateTime();
     }
   }
 
@@ -169,7 +190,7 @@ enum class TimeSettingMode {
   HOURS,
   MINUTES,
   DAYS
-}
+};
 
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
@@ -249,8 +270,8 @@ void displayDigits() {
   }
 }
 
-void toogleLights(bool On) {
-  lightsOn = On;
+void toggleLights() {
+  lightsOn = !lightsOn;
 }
     
  // Send the LED levels to the Arduino pins
@@ -330,7 +351,6 @@ void initRTC(){
 
   // Making it so, that the alarm will trigger an interrupt
   pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarmIsr, FALLING);
 
   // stop oscillating signals at SQW Pin
   // otherwise setAlarm1 will fail
@@ -350,8 +370,82 @@ void setAlarm(Alarm alarm) {
   }
 }
 
+enum class ButtonId {
+  ALARM1,
+  ALARM2,
+  RADIO,
+  LIGHTS,
+  SUNSET_TRIGGER,
+  TIME_SETTING
+};
 
-void onAlarmIsr()
-{
-  //This typical content of this ISR is basically covered by the RTCLib library.
+void onShortPress(ButtonId buttonId) {
+  switch(buttonId) {
+    case ButtonId::ALARM1: 
+      sunriseAlarm.toggleIsActive();
+      break;
+    case ButtonId::ALARM2: 
+      sunriseAlarm1.toggleIsActive();
+      break;
+    case ButtonId::RADIO: 
+      radioOn = !radioOn;
+      break;
+    case ButtonId::LIGHTS: 
+      toggleLights();
+      break;
+    case ButtonId::SUNSET_TRIGGER: 
+      sunsetAlarm.setToNow();
+      break;
+    case ButtonId::TIME_SETTING: 
+      settingMode = SettingMode::TIME;
+      break;
+  }
 }
+
+void onLongPress(ButtonId buttonId) {
+    switch(buttonId) {
+    case ButtonId::ALARM1: 
+      sunriseAlarm.toggleIsActive();
+      break;
+    case ButtonId::ALARM2: 
+      sunriseAlarm1.toggleIsActive();
+      break;
+    case ButtonId::RADIO: 
+      radioOn = !radioOn;
+      break;
+    case ButtonId::LIGHTS: 
+      toggleLights();
+      break;
+    case ButtonId::SUNSET_TRIGGER: 
+      sunsetAlarm.setToNow();
+      break;
+    case ButtonId::TIME_SETTING: 
+      settingMode = SettingMode::TIME;
+      break;
+  }
+}
+
+struct Button {
+    ButtonId id;
+    private: bool willReleaseLongPress = false;
+    private: Toggle button;
+    Button(ButtonId id, int pin,
+    void (*onShortPress)(ButtonId) = [](ButtonId){},
+    void (*onLongPress)(ButtonId) = [](ButtonId){})
+    : id(id), button(Toggle(pin)) {}
+
+    void poll() {
+      button.poll();
+      if(button.pressedFor(800)) {
+        willReleaseLongPress = true;
+      }
+      if(button.onRelease()) {
+        if(willReleaseLongPress) {
+          onLongPress(id);
+          willReleaseLongPress = false;
+        } else {
+          onShortPress(id);
+        }
+      }
+    }
+};
