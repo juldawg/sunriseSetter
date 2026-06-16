@@ -14,6 +14,7 @@
 #define RED_PIN 3
 #define GREEN_PIN 6
 #define BLUE_PIN 5
+#define ledPin 13
 
 RTC_DS3231 rtc;
 RTC_Millis rtc_millis;
@@ -192,6 +193,51 @@ enum class TimeSettingMode {
   DAYS
 };
 
+enum class ButtonId {
+  ALARM1,
+  ALARM2,
+  RADIO,
+  LIGHTS,
+  SUNSET_TRIGGER,
+  TIME_SETTING
+};
+
+struct Button {
+    ButtonId id;
+    bool willReleaseLongPress = false;
+    uint8_t pin;
+    Toggle button;
+    Button(ButtonId id, int pin)
+    : id(id), pin(pin), button(Toggle(pin)) {}
+
+    void setup() {
+      button.begin(pin);
+      button.setInputMode(Toggle::inputMode::input_pulldown);
+      button.setInputInvert(true);
+      Serial.println("init button\n");
+    }
+
+    void poll(void (*onShortPress)(ButtonId), void (*onLongPress)(ButtonId)) {
+      button.poll();
+      if(button.pressedFor(800)) {
+        if (!willReleaseLongPress) {
+          Serial.println("detect long press!\n");
+          onLongPress(id);
+          willReleaseLongPress = true;
+        }
+      }
+      if(button.onRelease()) {
+        if(willReleaseLongPress) {
+          Serial.println("released long press!\n");
+          willReleaseLongPress = false;
+        } else {
+          onShortPress(id);
+      Serial.println("onShortPress!\n");
+        }
+      }
+    }
+};
+
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
 unsigned long settingChangeTime;
@@ -202,6 +248,8 @@ SettingMode settingMode = SettingMode::IDLE;
 bool radioOn = false;
 bool lightsOn = false;
 bool shouldSunRise = true;
+Button buttons[1] = { Button(ButtonId::ALARM1, 2) };
+Toggle button(2);
   
 // =====================================
 // ARDUINO SETUP ROUTINE
@@ -211,53 +259,71 @@ void setup() {
   pinMode(RED_PIN, OUTPUT);
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+  //pinMode(2, INPUT);
   setLEDS(Brightness(0,0,0));
   delayBetweenIncrements = sunriseDuration / 256;
-  initRTC();
+  //button.begin(2);
+  for (Button& button : buttons) {
+    button.setup();
+  }
+  //initRTC();
 }
 
 // =====================================
 // ARDUINO MAIN LOOP ROUTINE
 // -------------------------------------
 void loop() {
-  displayDigits();
-  if (rtc.alarmFired(1))
-    {
-      Serial.println("Alarm 1 has gone off. Dimming UP!\n");
-      //reset flag
-      rtc.clearAlarm(1);
-      //Start dimming up
-      dimming_up = shouldSunRise;
-      startingTime = millis();
-      setAlarm(Alarm(AlarmType::SUNRISE));
-    }
-  if (rtc.alarmFired(2))
-    {
-      Serial.println("Alarm 1 has gone off. Dimming UP!\n");
-      //reset flag
-      rtc.clearAlarm(2);
-      //Start dimming up
-      dimming_down = true;
-      startingTime = millis();      
-      setAlarm(Alarm(AlarmType::SUNSET));
+  for (Button& button : buttons) {
+    button.poll(onShortPress, onLongPress);
+  }
+  digitalWrite(ledPin, lightsOn ? HIGH : LOW);
+  // button.poll();
+  // if(button.onRelease()) {
+  //   digitalWrite(ledPin, HIGH);
+  //   Serial.println("onRelease");
+  // } else {
+  //   digitalWrite(ledPin, LOW);
+  // }
 
-    }
-    if (dimming_up || dimming_down) {
-      unsigned long currentTime = millis();
-      unsigned long elapsedTime = currentTime - startingTime;
-      setLEDS(getUpdatedBrightness(currentTime, dimming_down));
+  // displayDigits();
+  // if (rtc.alarmFired(1))
+  //   {
+  //     Serial.println("Alarm 1 has gone off. Dimming UP!\n");
+  //     //reset flag
+  //     rtc.clearAlarm(1);
+  //     //Start dimming up
+  //     dimming_up = shouldSunRise;
+  //     startingTime = millis();
+  //     setAlarm(Alarm(AlarmType::SUNRISE));
+  //   }
+  // if (rtc.alarmFired(2))
+  //   {
+  //     Serial.println("Alarm 1 has gone off. Dimming UP!\n");
+  //     //reset flag
+  //     rtc.clearAlarm(2);
+  //     //Start dimming up
+  //     dimming_down = true;
+  //     startingTime = millis();      
+  //     setAlarm(Alarm(AlarmType::SUNSET));
+
+  //   }
+  //   if (dimming_up || dimming_down) {
+  //     unsigned long currentTime = millis();
+  //     unsigned long elapsedTime = currentTime - startingTime;
+  //     setLEDS(getUpdatedBrightness(currentTime, dimming_down));
       
-      if (elapsedTime > sunriseDuration) {
-        dimming_up = false;
-        dimming_down = false;
-      }
-    } else {
-      if (rtc.getAlarm1() < rtc.getAlarm2()) {
-        setLEDS(Brightness(0,0,0));
-      } else {
-        setLEDS(Brightness(255,255,79));
-      }
-    }
+  //     if (elapsedTime > sunriseDuration) {
+  //       dimming_up = false;
+  //       dimming_down = false;
+  //     }
+  //   } else {
+  //     if (rtc.getAlarm1() < rtc.getAlarm2()) {
+  //       setLEDS(Brightness(0,0,0));
+  //     } else {
+  //       setLEDS(Brightness(255,255,79));
+  //     }
+  //   }
     // delay(delayBetweenIncrements); // this might mess up the digit display
 }
 
@@ -370,19 +436,13 @@ void setAlarm(Alarm alarm) {
   }
 }
 
-enum class ButtonId {
-  ALARM1,
-  ALARM2,
-  RADIO,
-  LIGHTS,
-  SUNSET_TRIGGER,
-  TIME_SETTING
-};
-
 void onShortPress(ButtonId buttonId) {
   switch(buttonId) {
     case ButtonId::ALARM1: 
-      sunriseAlarm.toggleIsActive();
+      //sunriseAlarm.toggleIsActive();
+      toggleLights();
+      
+      Serial.println("short press!\n");
       break;
     case ButtonId::ALARM2: 
       sunriseAlarm1.toggleIsActive();
@@ -405,7 +465,8 @@ void onShortPress(ButtonId buttonId) {
 void onLongPress(ButtonId buttonId) {
     switch(buttonId) {
     case ButtonId::ALARM1: 
-      sunriseAlarm.toggleIsActive();
+      //sunriseAlarm.toggleIsActive();
+      toggleLights();
       break;
     case ButtonId::ALARM2: 
       sunriseAlarm1.toggleIsActive();
@@ -424,28 +485,3 @@ void onLongPress(ButtonId buttonId) {
       break;
   }
 }
-
-struct Button {
-    ButtonId id;
-    private: bool willReleaseLongPress = false;
-    private: Toggle button;
-    Button(ButtonId id, int pin,
-    void (*onShortPress)(ButtonId) = [](ButtonId){},
-    void (*onLongPress)(ButtonId) = [](ButtonId){})
-    : id(id), button(Toggle(pin)) {}
-
-    void poll() {
-      button.poll();
-      if(button.pressedFor(800)) {
-        willReleaseLongPress = true;
-      }
-      if(button.onRelease()) {
-        if(willReleaseLongPress) {
-          onLongPress(id);
-          willReleaseLongPress = false;
-        } else {
-          onShortPress(id);
-        }
-      }
-    }
-};
