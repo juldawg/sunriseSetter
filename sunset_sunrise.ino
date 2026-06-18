@@ -7,6 +7,7 @@
 #include <TimerOne.h>
 #include <Wire.h>
 #include <Optional.h>
+#include <map>
 
 // ARDUINO CONSTANT & VARIABLE DEFINITIONS
 // -------------------------------------
@@ -15,12 +16,15 @@
 #define GREEN_PIN 6
 #define BLUE_PIN 5
 #define ledPin 13
-#define alarm1Button 2
-#define alarm2Button 4
-#define radioButton 7
-#define lightsButton 8
-#define sunsetTriggerButton 9
-#define timeSettingButton 10
+#define alarm1Button 4
+#define alarm2Button 7
+#define radioButton 8
+#define lightsButton 9
+#define sunsetTriggerButton 10
+#define timeSettingButton 11
+#define rotaryEncoderButton 12
+#define rotaryEncoderClk 2
+#define rotaryEncoderDt 13
 
 RTC_DS3231 rtc;
 RTC_Millis rtc_millis;
@@ -205,7 +209,8 @@ enum class ButtonId {
   RADIO,
   LIGHTS,
   SUNSET_TRIGGER,
-  TIME_SETTING
+  TIME_SETTING,
+  SETTING_VALIDATE
 };
 
 struct Button {
@@ -238,6 +243,26 @@ struct Button {
     }
 };
 
+enum class SettingType {
+  case BRIGHTNESS,
+  case FREQUENCY,
+  case HOUR,
+  case MINUTE
+}
+struct Setting {
+  SettingType type;
+  int minValue;
+  int maxValue;
+  int steps;
+};
+
+std::map<SettingType, Setting> settings = {
+  { SettingType::BRIGHTNESS, { 0,   255, 20 } },
+  { SettingType::FREQUENCY,      {87.6,   107.4, 0.1 } },
+  { SettingType::HOUR,      { 0,  23, 1 } },
+  { SettingType::MINUTE,      { 0,  59, 1 } }
+};
+
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
 unsigned long startingTime;
 unsigned long settingChangeTime;
@@ -254,8 +279,10 @@ Button buttons[6] = {
   Button(ButtonId::LIGHTS, lightsButton),
   Button(ButtonId::RADIO, radioButton),
   Button(ButtonId::SUNSET_TRIGGER, sunsetTriggerButton),
-  Button(ButtonId::TIME_SETTING, timeSettingButton)
- };
+  Button(ButtonId::TIME_SETTING, timeSettingButton),
+  Button(ButtonId::SETTING_VALIDATE, rotaryEncoderButton)
+ }; 
+volatile bool lastCLK = HIGH;
   
 // =====================================
 // ARDUINO SETUP ROUTINE
@@ -266,6 +293,10 @@ void setup() {
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
   pinMode(ledPin, OUTPUT);
+  pinMode(rotaryEncoderClk, INPUT_PULLUP);
+  pinMode(rotaryEncoderDt, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(rotaryEncoderClk), readEncoder, CHANGE);
   setLEDS(Brightness(0,0,0));
   delayBetweenIncrements = sunriseDuration / 256;
   for (Button& button : buttons) {
@@ -482,4 +513,21 @@ void onLongPress(ButtonId buttonId) {
         break;
     }
   }
+}
+
+void readEncoder() {
+  bool currentCLK = digitalRead(PIN_CLK);
+  if (currentCLK != lastCLK) {
+    if (digitalRead(PIN_DT) != currentCLK) {
+      encoderDelta++;
+    } else {
+      encoderDelta--;
+    }
+  }
+  lastCLK = currentCLK;
+}
+
+template <typename Value>
+Value applyDelta(Setting &setting, Value currentValue, int delta) {
+  return constrain(currentValue + delta * (setting.maxValue - setting.minValue) / setting.steps, settinsetting.minValue, p.maxValue);
 }
