@@ -15,6 +15,12 @@
 #define GREEN_PIN 6
 #define BLUE_PIN 5
 #define ledPin 13
+#define alarm1Button 2
+#define alarm2Button 4
+#define radioButton 7
+#define lightsButton 8
+#define sunsetTriggerButton 9
+#define timeSettingButton 10
 
 RTC_DS3231 rtc;
 RTC_Millis rtc_millis;
@@ -205,34 +211,28 @@ enum class ButtonId {
 struct Button {
     ButtonId id;
     bool willReleaseLongPress = false;
-    uint8_t pin;
     Toggle button;
     Button(ButtonId id, int pin)
-    : id(id), pin(pin), button(Toggle(pin)) {}
+    : id(id), button(Toggle(pin)) {}
 
     void setup() {
-      button.begin(pin);
       button.setInputMode(Toggle::inputMode::input_pulldown);
       button.setInputInvert(true);
-      Serial.println("init button\n");
     }
 
     void poll(void (*onShortPress)(ButtonId), void (*onLongPress)(ButtonId)) {
       button.poll();
       if(button.pressedFor(800)) {
         if (!willReleaseLongPress) {
-          Serial.println("detect long press!\n");
           onLongPress(id);
           willReleaseLongPress = true;
         }
       }
       if(button.onRelease()) {
         if(willReleaseLongPress) {
-          Serial.println("released long press!\n");
           willReleaseLongPress = false;
         } else {
           onShortPress(id);
-      Serial.println("onShortPress!\n");
         }
       }
     }
@@ -248,8 +248,14 @@ SettingMode settingMode = SettingMode::IDLE;
 bool radioOn = false;
 bool lightsOn = false;
 bool shouldSunRise = true;
-Button buttons[1] = { Button(ButtonId::ALARM1, 2) };
-Toggle button(2);
+Button buttons[6] = {
+  Button(ButtonId::ALARM1, alarm1Button),
+  Button(ButtonId::ALARM2, alarm2Button),
+  Button(ButtonId::LIGHTS, lightsButton),
+  Button(ButtonId::RADIO, radioButton),
+  Button(ButtonId::SUNSET_TRIGGER, sunsetTriggerButton),
+  Button(ButtonId::TIME_SETTING, timeSettingButton)
+ };
   
 // =====================================
 // ARDUINO SETUP ROUTINE
@@ -260,10 +266,8 @@ void setup() {
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
   pinMode(ledPin, OUTPUT);
-  //pinMode(2, INPUT);
   setLEDS(Brightness(0,0,0));
   delayBetweenIncrements = sunriseDuration / 256;
-  //button.begin(2);
   for (Button& button : buttons) {
     button.setup();
   }
@@ -278,13 +282,6 @@ void loop() {
     button.poll(onShortPress, onLongPress);
   }
   digitalWrite(ledPin, lightsOn ? HIGH : LOW);
-  // button.poll();
-  // if(button.onRelease()) {
-  //   digitalWrite(ledPin, HIGH);
-  //   Serial.println("onRelease");
-  // } else {
-  //   digitalWrite(ledPin, LOW);
-  // }
 
   // displayDigits();
   // if (rtc.alarmFired(1))
@@ -437,51 +434,52 @@ void setAlarm(Alarm alarm) {
 }
 
 void onShortPress(ButtonId buttonId) {
-  switch(buttonId) {
-    case ButtonId::ALARM1: 
-      //sunriseAlarm.toggleIsActive();
-      toggleLights();
-      
-      Serial.println("short press!\n");
-      break;
-    case ButtonId::ALARM2: 
-      sunriseAlarm1.toggleIsActive();
-      break;
-    case ButtonId::RADIO: 
-      radioOn = !radioOn;
-      break;
-    case ButtonId::LIGHTS: 
-      toggleLights();
-      break;
-    case ButtonId::SUNSET_TRIGGER: 
-      sunsetAlarm.setToNow();
-      break;
-    case ButtonId::TIME_SETTING: 
-      settingMode = SettingMode::TIME;
-      break;
+  if (settingMode == SettingMode::IDLE) {
+    switch(buttonId) {
+      case ButtonId::ALARM1: 
+        sunriseAlarm.toggleIsActive();
+        break;
+      case ButtonId::ALARM2: 
+        sunriseAlarm1.toggleIsActive();
+        break;
+      case ButtonId::RADIO: 
+        radioOn = !radioOn;
+        break;
+      case ButtonId::LIGHTS: 
+        toggleLights();
+        break;
+      case ButtonId::SUNSET_TRIGGER: 
+        sunsetAlarm.setToNow();
+        break;
+      case ButtonId::TIME_SETTING: 
+        settingMode = SettingMode::TIME;
+        break;
+    }
   }
 }
 
 void onLongPress(ButtonId buttonId) {
+  if (settingMode == SettingMode::IDLE) {
     switch(buttonId) {
-    case ButtonId::ALARM1: 
-      //sunriseAlarm.toggleIsActive();
-      toggleLights();
-      break;
-    case ButtonId::ALARM2: 
-      sunriseAlarm1.toggleIsActive();
-      break;
-    case ButtonId::RADIO: 
-      radioOn = !radioOn;
-      break;
-    case ButtonId::LIGHTS: 
-      toggleLights();
-      break;
-    case ButtonId::SUNSET_TRIGGER: 
-      sunsetAlarm.setToNow();
-      break;
-    case ButtonId::TIME_SETTING: 
-      settingMode = SettingMode::TIME;
-      break;
+      case ButtonId::ALARM1: 
+        sunriseAlarm.toggleIsActive();
+        //TODO: Briefly show the hour of the alarm if it's active
+        break;
+      case ButtonId::ALARM2: 
+        sunriseAlarm1.toggleIsActive();
+        break;
+      case ButtonId::RADIO: 
+        radioOn = !radioOn;
+        break;
+      case ButtonId::LIGHTS: 
+        toggleLights();
+        break;
+      case ButtonId::SUNSET_TRIGGER: 
+        sunsetAlarm.setToNow();
+        break;
+      case ButtonId::TIME_SETTING: 
+        settingMode = SettingMode::TIME;
+        break;
+    }
   }
 }
