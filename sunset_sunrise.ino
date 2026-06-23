@@ -536,14 +536,13 @@ void onLongPress(ButtonId buttonId) {
   if (currentSetting.mode == SettingMode::IDLE) {
     switch(buttonId) {
       case ButtonId::ALARM1: 
-        sunriseAlarm.toggleIsActive();
-        //TODO: Briefly show the hour of the alarm if it's active
+        currentSetting.mode = SettingMode::ALARM1;
         break;
       case ButtonId::ALARM2: 
-        sunriseAlarm1.toggleIsActive();
+        currentSetting.mode = SettingMode::ALARM2;
         break;
       case ButtonId::RADIO: 
-        radioOn = !radioOn;
+        currentSetting.mode = SettingMode::FREQUENCY;
         break;
       case ButtonId::LIGHTS: 
         toggleLights();
@@ -596,6 +595,10 @@ void withCurrentValue(Setting current, int delta) {
             default: break;
           }
           rtc.adjust(newNow);
+          break;
+        case SettingMode::IDLE:
+          currentSetting.mode = SettingMode::BRIGHTNESS;
+          brightness = applyDelta(SettingValues(SettingType::BRIGHTNESS), brightness, delta); 
           break;
         default: break;
     }
