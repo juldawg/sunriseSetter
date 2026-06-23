@@ -7,7 +7,6 @@
 #include <TimerOne.h>
 #include <Wire.h>
 #include <Optional.h>
-#include <map>
 
 // ARDUINO CONSTANT & VARIABLE DEFINITIONS
 // -------------------------------------
@@ -191,16 +190,41 @@ struct Brightness {
 };
 
 enum class SettingMode {
-  BRIGHTNESS,
-  TIME,
-  FREQUENCY,
-  IDLE
+    BRIGHTNESS,
+    TIME,
+    FREQUENCY,
+    ALARM1,
+    ALARM2,
+    IDLE
 };
 
 enum class TimeSettingMode {
-  HOURS,
-  MINUTES,
-  DAYS
+    HOURS,
+    MINUTES
+    //DAYS
+};
+
+struct Setting {
+    SettingMode mode;
+    TimeSettingMode timeMode;
+
+    static Setting make(SettingMode mode) {
+        return {mode, TimeSettingMode::HOURS};
+    }
+
+    Setting next() const {
+        switch (mode) {
+            case SettingMode::TIME:
+            case SettingMode::ALARM1:
+            case SettingMode::ALARM2:
+                switch (timeMode) {
+                    case TimeSettingMode::HOURS:   return {mode, TimeSettingMode::MINUTES};
+                    default:                       return Setting::make(SettingMode::IDLE);
+                }
+            default:
+                return Setting::make(SettingMode::IDLE);
+        }
+    }
 };
 
 enum class ButtonId {
@@ -244,23 +268,37 @@ struct Button {
 };
 
 enum class SettingType {
-  case BRIGHTNESS,
-  case FREQUENCY,
-  case HOUR,
-  case MINUTE
-}
-struct Setting {
-  SettingType type;
-  int minValue;
-  int maxValue;
-  int steps;
+  BRIGHTNESS,
+  FREQUENCY,
+  HOUR,
+  MINUTE
 };
 
-std::map<SettingType, Setting> settings = {
-  { SettingType::BRIGHTNESS, { 0,   255, 20 } },
-  { SettingType::FREQUENCY,      {87.6,   107.4, 0.1 } },
-  { SettingType::HOUR,      { 0,  23, 1 } },
-  { SettingType::MINUTE,      { 0,  59, 1 } }
+struct SettingValues {
+  SettingType type;
+  float minValue() {
+    switch(type) {
+      case SettingType::FREQUENCY: return 87.6;
+      default: return 0;
+    }
+  }
+  float maxValue() {
+    switch(type) {
+      case SettingType::BRIGHTNESS: 255;
+      case SettingType::FREQUENCY: 107.4;
+      case SettingType::HOUR: 23;
+      case SettingType::MINUTE: 59;
+    }
+  }
+  float steps() {
+    switch(type) {
+      case SettingType::BRIGHTNESS: 20;
+      case SettingType::FREQUENCY: 0.1;
+      case SettingType::HOUR: 1;
+      case SettingType::MINUTE: 1;
+    }
+  }
+  SettingValues(SettingType type): type(type) {}
 };
 
 const unsigned long sunriseDuration = 30UL * 60UL * 1000UL;
@@ -269,11 +307,13 @@ unsigned long settingChangeTime;
 bool dimming_up = false;
 bool dimming_down = false;
 long delayBetweenIncrements;
-SettingMode settingMode = SettingMode::IDLE;
+Setting currentSetting = Setting::make(SettingMode::IDLE);
 bool radioOn = false;
 bool lightsOn = false;
+int brightness = 0;
+float frequency = 92.8;
 bool shouldSunRise = true;
-Button buttons[6] = {
+Button buttons[7] = {
   Button(ButtonId::ALARM1, alarm1Button),
   Button(ButtonId::ALARM2, alarm2Button),
   Button(ButtonId::LIGHTS, lightsButton),
@@ -356,9 +396,9 @@ void loop() {
 }
 
 void displayDigits() {
-  if (settingMode == SettingMode::IDLE) {
+  if (currentSetting.mode == SettingMode::IDLE) {
     // Display time
-  } else if (settingMode == SettingMode::BRIGHTNESS) {
+  } else if (currentSetting.mode == SettingMode::BRIGHTNESS) {
     // Display Brightness level
     // Check if should default back to idle
   }
@@ -465,7 +505,7 @@ void setAlarm(Alarm alarm) {
 }
 
 void onShortPress(ButtonId buttonId) {
-  if (settingMode == SettingMode::IDLE) {
+  if (currentSetting.mode == SettingMode::IDLE) {
     switch(buttonId) {
       case ButtonId::ALARM1: 
         sunriseAlarm.toggleIsActive();
@@ -483,14 +523,17 @@ void onShortPress(ButtonId buttonId) {
         sunsetAlarm.setToNow();
         break;
       case ButtonId::TIME_SETTING: 
-        settingMode = SettingMode::TIME;
+        currentSetting = Setting::make(SettingMode::TIME);
+        break;
+      case ButtonId::SETTING_VALIDATE:
+        currentSetting = currentSetting.next();
         break;
     }
   }
 }
 
 void onLongPress(ButtonId buttonId) {
-  if (settingMode == SettingMode::IDLE) {
+  if (currentSetting.mode == SettingMode::IDLE) {
     switch(buttonId) {
       case ButtonId::ALARM1: 
         sunriseAlarm.toggleIsActive();
@@ -509,25 +552,65 @@ void onLongPress(ButtonId buttonId) {
         sunsetAlarm.setToNow();
         break;
       case ButtonId::TIME_SETTING: 
-        settingMode = SettingMode::TIME;
+        currentSetting = Setting::make(SettingMode::TIME);
+        break;
+      case ButtonId::SETTING_VALIDATE:
+        currentSetting = currentSetting.next();
         break;
     }
   }
 }
 
-void readEncoder() {
-  bool currentCLK = digitalRead(PIN_CLK);
-  if (currentCLK != lastCLK) {
-    if (digitalRead(PIN_DT) != currentCLK) {
-      encoderDelta++;
-    } else {
-      encoderDelta--;
-    }
-  }
-  lastCLK = currentCLK;
+template <typename Value> Value applyDelta(SettingValues setting, Value currentValue, int delta) {
+  return constrain(currentValue + delta * (setting.maxValue() - setting.minValue()) / setting.steps(), setting.minValue(), setting.maxValue());
 }
 
-template <typename Value>
-Value applyDelta(Setting &setting, Value currentValue, int delta) {
-  return constrain(currentValue + delta * (setting.maxValue - setting.minValue) / setting.steps, settinsetting.minValue, p.maxValue);
+void withCurrentValue(Setting current, int delta) {
+    switch (current.mode) {
+        case SettingMode::BRIGHTNESS: brightness = applyDelta(SettingValues(SettingType::BRIGHTNESS), brightness, delta); break;
+        case SettingMode::FREQUENCY: frequency = applyDelta(SettingValues(SettingType::FREQUENCY), frequency, delta);  break;
+        case SettingMode::ALARM1:
+            switch (current.timeMode) {
+                case TimeSettingMode::HOURS: sunriseAlarm.hour = applyDelta(SettingValues(SettingType::HOUR), sunriseAlarm.hour, delta);   break;
+                case TimeSettingMode::MINUTES: sunriseAlarm.minute = applyDelta(SettingValues(SettingType::MINUTE) , sunriseAlarm.minute, delta); break;
+            }
+            break;
+        case SettingMode::ALARM2:
+            switch (current.timeMode) {
+                case TimeSettingMode::HOURS: sunriseAlarm1.hour = applyDelta(SettingValues(SettingType::HOUR), sunriseAlarm1.hour, delta);   break;
+                case TimeSettingMode::MINUTES: sunriseAlarm1.minute = applyDelta(SettingValues(SettingType::MINUTE), sunriseAlarm1.minute, delta); break;
+            }
+            break;
+        case SettingMode::TIME:
+          DateTime now = rtc.now();
+          DateTime newNow;
+          switch (currentSetting.timeMode) {
+            case TimeSettingMode::HOURS: 
+              TimeSpan oneHour = TimeSpan(0, delta*1, 0, 0);
+              newNow = now + oneHour;
+              break;
+            case TimeSettingMode::MINUTES: 
+              TimeSpan oneMinute = TimeSpan(0, 0, delta*1, 0);
+              newNow = now + oneMinute;
+              break;
+            default: break;
+          }
+          rtc.adjust(newNow);
+          break;
+        default: break;
+    }
+}
+
+void readEncoder() {
+  bool currentCLK = digitalRead(rotaryEncoderClk);
+  if (currentCLK != lastCLK) {
+    int delta;
+    if (digitalRead(rotaryEncoderDt) != currentCLK) {
+      delta = 1;
+    } else {
+      delta = -1;
+    }
+    withCurrentValue(currentSetting, delta);
+  }
+  lastCLK = currentCLK;
 }
